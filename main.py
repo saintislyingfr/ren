@@ -9,16 +9,13 @@ from datetime import datetime, timedelta
 from io import BytesIO
 import base64
 from flask import Flask, request, jsonify, render_template_string, redirect, url_for
-from flask_cors import CORS
-import requests
 
 app = Flask(__name__)
-CORS(app)
 
 # Configuration
 PORT = int(os.environ.get('PORT', 8080))
-RENDER_PUBLIC_DOMAIN = os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost:8080')
-RENDER_PUBLIC_URL = f"https://{RENDER_PUBLIC_DOMAIN}" if 'onrender.com' in RENDER_PUBLIC_DOMAIN else f"http://{RENDER_PUBLIC_DOMAIN}"
+RENDER_EXTERNAL_HOSTNAME = os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'localhost')
+RENDER_PUBLIC_URL = f"https://{RENDER_EXTERNAL_HOSTNAME}" if 'onrender.com' in RENDER_EXTERNAL_HOSTNAME else f"http://{RENDER_EXTERNAL_HOSTNAME}:{PORT}"
 
 # In-memory storage (will reset on restart)
 links = {}
@@ -29,19 +26,19 @@ active_connections = {}
 DEFAULT_VLESS_CONFIG = {
     "v": "2",
     "ps": "Render-Gateway-Default",
-    "add": RENDER_PUBLIC_DOMAIN,
+    "add": RENDER_EXTERNAL_HOSTNAME,
     "port": "443",
     "id": str(uuid.uuid4()),
     "aid": "0",
     "scy": "auto",
     "net": "ws",
     "type": "none",
-    "host": RENDER_PUBLIC_DOMAIN,
+    "host": RENDER_EXTERNAL_HOSTNAME,
     "path": "/vless",
     "tls": "tls"
 }
 
-# HTML Template with Red/Black Theme
+# HTML Template with Red/Black Theme (same as before, shortened for brevity)
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
@@ -57,14 +54,13 @@ HTML_TEMPLATE = """
         }
 
         body {
-            font-family: 'Segoe UI', 'Poppins', 'Courier New', monospace;
+            font-family: 'Segoe UI', 'Poppins', monospace;
             background: linear-gradient(135deg, #0a0a0a 0%, #1a0000 50%, #0a0505 100%);
             color: #ff3333;
             min-height: 100vh;
             overflow-x: hidden;
         }
 
-        /* Animated Background */
         .bg-animation {
             position: fixed;
             width: 100%;
@@ -88,14 +84,12 @@ HTML_TEMPLATE = """
             100% { transform: translate(50px, 50px); }
         }
 
-        /* Glassmorphism Container */
         .container {
             max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
         }
 
-        /* Header */
         .header {
             background: rgba(0, 0, 0, 0.85);
             backdrop-filter: blur(10px);
@@ -128,7 +122,6 @@ HTML_TEMPLATE = """
             margin-top: 10px;
         }
 
-        /* Stats Cards */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -177,7 +170,6 @@ HTML_TEMPLATE = """
             text-shadow: 0 0 5px #ff0000;
         }
 
-        /* Tables & Cards */
         .section {
             background: rgba(0, 0, 0, 0.75);
             backdrop-filter: blur(10px);
@@ -221,7 +213,6 @@ HTML_TEMPLATE = """
             background: rgba(255, 0, 0, 0.1);
         }
 
-        /* Buttons */
         .btn {
             background: linear-gradient(135deg, #ff0000, #990000);
             color: white;
@@ -251,7 +242,6 @@ HTML_TEMPLATE = """
             background: linear-gradient(135deg, #0066cc, #003366);
         }
 
-        /* Form */
         .form-group {
             margin-bottom: 15px;
         }
@@ -272,7 +262,6 @@ HTML_TEMPLATE = """
             box-shadow: 0 0 10px rgba(255, 0, 0, 0.3);
         }
 
-        /* Modal */
         .modal {
             display: none;
             position: fixed;
@@ -320,7 +309,6 @@ HTML_TEMPLATE = """
             color: #ff6666;
         }
 
-        /* QR Code */
         .qrcode {
             margin: 20px auto;
             padding: 20px;
@@ -329,7 +317,6 @@ HTML_TEMPLATE = """
             border-radius: 10px;
         }
 
-        /* Alerts */
         .alert {
             padding: 12px;
             border-radius: 8px;
@@ -354,7 +341,6 @@ HTML_TEMPLATE = """
             to { opacity: 1; }
         }
 
-        /* Responsive */
         @media (max-width: 768px) {
             .stats-grid {
                 grid-template-columns: 1fr;
@@ -370,7 +356,6 @@ HTML_TEMPLATE = """
             }
         }
 
-        /* Scrollbar */
         ::-webkit-scrollbar {
             width: 10px;
             height: 10px;
@@ -388,29 +373,12 @@ HTML_TEMPLATE = """
         ::-webkit-scrollbar-thumb:hover {
             background: #ff6666;
         }
-
-        /* Loading Animation */
-        .loader {
-            border: 3px solid #330000;
-            border-top: 3px solid #ff0000;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
     </style>
 </head>
 <body>
     <div class="bg-animation"></div>
     
     <div class="container">
-        <!-- Header -->
         <div class="header">
             <h1>⚡ RENDER GATEWAY</h1>
             <div class="badge">VLESS + WebSocket | Premium Tunnel</div>
@@ -419,7 +387,6 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Stats -->
         <div class="stats-grid">
             <div class="stat-card">
                 <h3>📊 Total Links</h3>
@@ -439,7 +406,6 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Create Link Form -->
         <div class="section">
             <div class="section-title">🔗 Create New Link</div>
             <div style="display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: end;">
@@ -461,7 +427,6 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Links Table -->
         <div class="section">
             <div class="section-title">📋 Active Links</div>
             <div class="link-table">
@@ -477,7 +442,6 @@ HTML_TEMPLATE = """
         </div>
     </div>
 
-    <!-- QR Code Modal -->
     <div id="qrModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeModal()">&times;</span>
@@ -491,7 +455,6 @@ HTML_TEMPLATE = """
     <script>
         let currentLink = '';
         
-        // Fetch stats and links
         async function fetchData() {
             try {
                 const response = await fetch('/api/stats');
@@ -617,11 +580,9 @@ HTML_TEMPLATE = """
             return div.innerHTML;
         }
         
-        // Auto-refresh every 5 seconds
         setInterval(fetchData, 5000);
         fetchData();
         
-        // Close modal on outside click
         window.onclick = function(event) {
             const modal = document.getElementById('qrModal');
             if (event.target === modal) {
@@ -655,7 +616,6 @@ def get_stats():
 def get_links():
     links_list = []
     for link_id, link_data in links.items():
-        # Check expiry
         if link_data.get('expires_at') and datetime.now() > datetime.fromisoformat(link_data['expires_at']):
             link_data['active'] = False
         
@@ -709,15 +669,12 @@ def get_vless_link(link_id):
     if link_id not in links:
         return jsonify({'error': 'Link not found'}), 404
     
-    # Generate VLESS config
     config = DEFAULT_VLESS_CONFIG.copy()
     config['ps'] = links[link_id]['name']
     config['id'] = link_id
     
-    # Build VLESS link
     vless_link = f"vless://{config['id']}@{config['add']}:{config['port']}?encryption=none&security=tls&sni={config['host']}&type=ws&host={config['host']}&path={config['path']}#{config['ps']}"
     
-    # Generate QR code
     qr = qrcode.QRCode(version=1, box_size=10, border=5)
     qr.add_data(vless_link)
     qr.make(fit=True)
@@ -731,6 +688,10 @@ def get_vless_link(link_id):
         'vless_link': vless_link,
         'qr_code': f'data:image/png;base64,{qr_base64}'
     })
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
 
 if __name__ == '__main__':
     print(f"""
